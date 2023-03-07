@@ -441,12 +441,15 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
 
     ###### TRAINING ######
 
-    # compute optimal beta with matrix inversion
-    beta = np.linalg.pinv(X_train.T @ X_train + lambda_r * np.eye(X_train.shape[1])) @ X_train.T @ Z_train
-
     if lasso:
         # do lasso regression with scikit-learn
         beta = Lasso(alpha=lambda_r).fit(X_train, Z_train).coef_
+    else:
+        ridge_reg = lambda_r * np.eye(X_train.shape[1])
+        assert ridge_reg.shape == (X_train.shape[1], X_train.shape[1]), f"!shape mismatch : {ridge_reg.shape=} != {X_train.shape[1], X_train.shape[1]=}"
+
+        # compute optimal beta with matrix inversion
+        beta = np.linalg.pinv(X_train.T @ X_train + ridge_reg) @ X_train.T @ Z_train
     
     # training predictions
     Z_pred_train = (X_train @ beta).reshape(-1, 1)
