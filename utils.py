@@ -3,6 +3,28 @@ from sklearn.model_selection import KFold
 from sklearn.linear_model import Lasso
 
 
+### utility functions ###
+
+def save_figure(fig: object, name: str, path: str):
+
+    """
+    save a figure in a path
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        figure to save
+    name : str
+        name of the file
+    path : str
+        path where to save the figure
+    """
+
+    fig.savefig(path + '/' + name + '.png', dpi=300, bbox_inches='tight')
+
+    print("Figure saved in", path + '/' + name + '.png')
+
+
 ### DESIGN MATRIX ###
 
 def get_coefficients(nb_vars: int, degree: int, verbose=False) -> list:
