@@ -1,4 +1,5 @@
 import numpy as np 
+from sklearn import preprocessing
 from sklearn.model_selection import KFold
 from sklearn.linear_model import Lasso
 
@@ -23,6 +24,178 @@ def save_figure(fig: object, name: str, path: str):
     fig.savefig(path + '/' + name + '.png', dpi=300, bbox_inches='tight')
 
     print("Figure saved in", path + '/' + name + '.png')
+
+
+### DATA ###
+
+def FrankeFunction(x: np.ndarray, y: np.ndarray, noise_scale=0.1) -> np.ndarray:
+    
+    """
+    return the the Franke Function
+    
+    Parameters
+    ---------- x : np.ndarray
+    y : np.ndarray
+    noise_scale : float
+        scale of the noise term, default 0.1
+        
+    Returns:
+    np.ndarray : 
+        application of the function f(x, y)
+    """
+    
+    term1 = 0.75*np.exp(-(0.25*(9*x-2)**2) - 0.25*((9*y-2)**2))
+    term2 = 0.75*np.exp(-((9*x+1)**2)/49.0 - 0.1*(9*y+1))
+    term3 = 0.5*np.exp(-(9*x-7)**2/4.0 - 0.25*((9*y-3)**2))
+    term4 = -0.2*np.exp(-(9*x-4)**2 - (9*y-7)**2)
+    
+    noise_term = np.random.normal(0, noise_scale, x.shape)
+    
+    
+    return term1 + term2 + term3 + term4 + noise_term
+
+
+def generate_data(N: int, random_ax: bool=True, noise_scale: float=0.1, scaling: bool=False, mean_center=False) -> tuple:
+    
+    """
+    generate the data for training and 2d mesh
+    
+    Parameters
+    ----------
+    N : int
+        size
+    random_ax : bool
+        if True x, y will be drawn from rand() else arange, default True
+    noise_scale : float
+        standard devation of the noise term drawn from a Normal with zero mean, default 0.1
+    scaling : bool
+        if True, scale the data, default False
+    mean_center : bool
+        if True, mean center the data, default False
+        
+    Returns
+    -------
+    np.ndarray : x
+        (N, 1)
+    np.ndarray : y
+        (N, 1)
+    np.ndarray : z
+        (N, 1)
+        
+    np.ndarray : xm
+        (N, N)
+    np.ndarray : ym
+        (N, N)
+    np.ndarray : zm
+        (N, N)
+    """
+    
+    if random_ax:
+        x = np.random.rand(N, 1)
+        y = np.random.rand(N, 1)
+    else:
+        x = np.linspace(0, 1, N).reshape(N, 1)
+        y = np.linspace(0, 1, N).reshape(N, 1)
+
+    # define the target
+    z = FrankeFunction(x, y, noise_scale=noise_scale)
+
+    # make meshgrid
+    xm, ym = np.meshgrid(x,y)
+    zm = FrankeFunction(xm, ym, noise_scale=noise_scale)
+
+    # scale the data
+    if scaling:
+        x, y, xm, ym = (preprocessing.StandardScaler().fit_transform(x), 
+                        preprocessing.StandardScaler().fit_transform(y), 
+                        preprocessing.StandardScaler().fit_transform(xm), 
+                        preprocessing.StandardScaler().fit_transform(ym))
+
+    # mean center the data
+    if mean_center:
+        x, y, xm, ym = (mean_centering(x),
+                        mean_centering(y),
+                        mean_centering(xm),
+                        mean_centering(ym))
+   
+    return (x, y, z), (xm, ym, zm)
+
+
+def polynomial_data(degree: int, N: int, true_beta=None, random_ax=True, noise_scale=0, verbose=False) -> tuple:
+
+    """
+    generate the data from a polynomial of degree=degree
+
+    Parameters
+    ----------
+    degree : int
+        degree of the polynomial
+    N : int
+        size
+    true_beta : list [optional]
+        list of the coefficients of the polynomial, default None
+    random_ax : bool
+        if True, x will be drawn from rand() else arange, default True
+    noise_scale : float
+        standard devation of the noise term drawn from a Normal with zero mean, default 0
+    verbose : bool
+        if True, print the polynomial, default False
+
+    Returns
+    -------
+    np.ndarray : x
+    np.ndarray : z
+    """
+
+    if random_ax:
+        x = np.random.uniform(0, 10, size=(N, 1))
+    else:
+        x = np.linspace(0, 10, N).reshape(N, 1)
+
+    # create random coefficients
+    if true_beta is None:
+        true_beta = np.random.normal(0, 0.01, size=(degree + 1, 1))
+    else:
+        true_beta = np.array(true_beta).reshape(-1, 1)
+
+    # check degree and priorize the provided beta
+    if degree != len(true_beta) - 1:
+        degree = len(true_beta) - 1
+
+    # define design matrix 
+    D = build_design_matrix(X=x, degree=degree)
+
+    # add noise 
+    noise = np.random.normal(0, noise_scale, size=(N, 1))
+
+    # print 
+    if verbose:
+        print("true polynomial : z = ", end="")
+        for i in range(len(true_beta)):
+            if i != 0: print(" + ", end="")
+            print(f"({true_beta[i, 0]:.4f})*x^{i}", end="")
+        print()
+
+    return x, D @ true_beta + noise, true_beta
+
+
+def mean_centering(X: np.ndarray) -> np.ndarray:
+
+    """
+    mean centering of the data
+
+    Parameters
+    ----------
+    X : np.ndarray
+        (N, M)
+
+    Returns
+    -------
+    np.ndarray : X
+        (N, M)
+    """
+
+    return X - np.mean(X, axis=0)
 
 
 ### DESIGN MATRIX ###
@@ -84,7 +257,7 @@ def get_coefficients(nb_vars: int, degree: int, verbose=False) -> list:
     return coeff
 
 
-def build_design_matrix(X: np.ndarray, Y=None, degree=1) -> np.ndarray:
+def build_design_matrix(X: np.ndarray, Y=None, degree=1, intercept=False) -> np.ndarray:
 
     """
     return the design matrix of an input with one or two features, and degree=degree
@@ -97,6 +270,8 @@ def build_design_matrix(X: np.ndarray, Y=None, degree=1) -> np.ndarray:
         (n, 1) feature 2, default None
     degree : int
         degree of the polynomial, default 1
+    intercept : bool
+        if True, the intercept is added, default False
 
     Returns
     -------
@@ -106,7 +281,7 @@ def build_design_matrix(X: np.ndarray, Y=None, degree=1) -> np.ndarray:
     # size of the data
     n = len(X)
     trg_ax = 1
-    D = np.ones((n, 1))
+    D = np.ones((n, 1)) if intercept else np.zeros((n, 1))
     
     # one dimension case
     if Y is None:
@@ -121,7 +296,7 @@ def build_design_matrix(X: np.ndarray, Y=None, degree=1) -> np.ndarray:
         X = X.reshape(n, n, 1)
         Y = Y.reshape(n, n, 1)
         trg_ax = 2
-        D = np.ones((n, n, 1))
+        D = np.ones((n, n, 1)) if intercept else np.zeros((n, n, 1))
     
     coeff = get_coefficients(nb_vars=2, degree=degree)
     
@@ -133,137 +308,52 @@ def build_design_matrix(X: np.ndarray, Y=None, degree=1) -> np.ndarray:
     return D
 
 
-### DATA ###
-
-def FrankeFunction(x: np.ndarray, y: np.ndarray, noise_scale=0.1) -> np.ndarray:
-    
-    """
-    return the the Franke Function
-    
-    Parameters
-    ---------- x : np.ndarray
-    y : np.ndarray
-    noise_scale : float
-        scale of the noise term, default 0.1
-        
-    Returns:
-    np.ndarray : 
-        application of the function f(x, y)
-    """
-    
-    term1 = 0.75*np.exp(-(0.25*(9*x-2)**2) - 0.25*((9*y-2)**2))
-    term2 = 0.75*np.exp(-((9*x+1)**2)/49.0 - 0.1*(9*y+1))
-    term3 = 0.5*np.exp(-(9*x-7)**2/4.0 - 0.25*((9*y-3)**2))
-    term4 = -0.2*np.exp(-(9*x-4)**2 - (9*y-7)**2)
-    
-    noise_term = np.random.normal(0, noise_scale, x.shape)
-    
-    
-    return term1 + term2 + term3 + term4 + noise_term
-
-
-def generate_data(N: int, random_ax=True, noise_scale=0.1) -> tuple:
-    
-    """
-    generate the data for training and 2d mesh
-    
-    Parameters
-    ----------
-    N : int
-        size
-    random_ax : bool
-        if True x, y will be drawn from rand() else arange, default True
-    noise_scale : float
-        standard devation of the noise term drawn from a Normal with zero mean, default 0.1
-        
-    Returns
-    -------
-    np.ndarray : x
-        (N, 1)
-    np.ndarray : y
-        (N, 1)
-    np.ndarray : z
-        (N, 1)
-        
-    np.ndarray : xm
-        (N, N)
-    np.ndarray : ym
-        (N, N)
-    np.ndarray : zm
-        (N, N)
-    """
-    
-    if random_ax:
-        x = np.random.rand(N, 1)
-        y = np.random.rand(N, 1)
-    else:
-        x = np.linspace(0, 1, N).reshape(N, 1)
-        y = np.linspace(0, 1, N).reshape(N, 1)
-
-    z = FrankeFunction(x, y, noise_scale=noise_scale)
-
-    xm, ym = np.meshgrid(x,y)
-    zm = FrankeFunction(xm, ym, noise_scale=noise_scale)
-    
-    return (x, y, z), (xm, ym, zm)
-
-
-def polynomial_data(degree: int, N: int, true_beta=None, random_ax=True, noise_scale=0, verbose=False) -> tuple:
+def build_design_matrix_2(X: np.ndarray, Y=None, degree=1, intercept=False) -> np.ndarray:
 
     """
-    generate the data from a polynomial of degree=degree
+    return the design matrix of an input with one or two features, and degree=degree
 
     Parameters
     ----------
+    X : np.ndarray
+        (n, 1) feature 1 
+    Y : np.ndarray [optional]
+        (n, 1) feature 2, default None
     degree : int
-        degree of the polynomial
-    N : int
-        size
-    true_beta : list [optional]
-        list of the coefficients of the polynomial, default None
-    random_ax : bool
-        if True, x will be drawn from rand() else arange, default True
-    noise_scale : float
-        standard devation of the noise term drawn from a Normal with zero mean, default 0
-    verbose : bool
-        if True, print the polynomial, default False
+        degree of the polynomial, default 1
+    intercept : bool
+        if True, the intercept is added, default False
 
     Returns
     -------
-    np.ndarray : x
-    np.ndarray : z
+    np.ndarray : design matrix
     """
 
-    if random_ax:
-        x = np.random.uniform(0, 10, size=(N, 1))
-    else:
-        x = np.linspace(0, 10, N).reshape(N, 1)
+    # size of the data
+    n = len(X)
+    trg_ax = 1
+    D = np.ones((n, 1)) 
 
-    # create random coefficients
-    if true_beta is None:
-        true_beta = np.random.normal(0, 0.01, size=(degree + 1, 1))
-    else:
-        true_beta = np.array(true_beta).reshape(-1, 1)
+    # one dimension case
+    if Y is None:
+        for i in range(1, degree + 1):
+            D = np.concatenate([D, X**i], axis=trg_ax)
+        return D
 
-    # check degree and priorize the provided beta
-    if degree != len(true_beta) - 1:
-        degree = len(true_beta) - 1
+    # two dimensions case
+    # mesh data case
+    if X.shape[1] > 1:
+        X = X.reshape(n, n, 1)
+        Y = Y.reshape(n, n, 1)
+        trg_ax = 2
+        D = np.ones((n, n, 1))
 
-    # define design matrix 
-    D = build_design_matrix(X=x, degree=degree)
+    # build the full Design matrix
+    for i in range(1, degree + 1):
+        for j in range(i + 1):
+            D = np.concatenate([D, X**(i - j) * Y**j], axis=trg_ax)
 
-    # add noise 
-    noise = np.random.normal(0, noise_scale, size=(N, 1))
-
-    # print 
-    if verbose:
-        print("true polynomial : z = ", end="")
-        for i in range(len(true_beta)):
-            if i != 0: print(" + ", end="")
-            print(f"({true_beta[i, 0]:.4f})*x^{i}", end="")
-        print()
-
-    return x, D @ true_beta + noise, true_beta
+    return D
 
 
 ### EVALUATION METRICS ###
@@ -467,7 +557,7 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
         # do lasso regression with scikit-learn
         beta = Lasso(alpha=lambda_r).fit(X_train, Z_train).coef_
     else:
-        ridge_reg = lambda_r * np.eye(X_train.shape[1])
+        ridge_reg = lambda_r * np.eye(X_train.shape[1]) 
         assert ridge_reg.shape == (X_train.shape[1], X_train.shape[1]), f"!shape mismatch : {ridge_reg.shape=} != {X_train.shape[1], X_train.shape[1]=}"
 
         # compute optimal beta with matrix inversion
