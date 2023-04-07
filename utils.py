@@ -1,7 +1,14 @@
 import numpy as np 
 from sklearn import preprocessing
 from sklearn.model_selection import KFold
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, Ridge, LinearRegression
+
+# model for comparison
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+
+# import mean_squared_error
+from sklearn.metrics import mean_squared_error
 
 
 ### utility functions ###
@@ -402,7 +409,8 @@ def MSE(Z_true: np.ndarray, Z_pred: np.ndarray) -> float:
     
     assert Z_true.shape == Z_pred.shape, f"!shape mismatch : {Z_true.shape=} != {Z_pred.shape=}"
     
-    return ((Z_true - Z_pred)**2).mean()
+    # return ((Z_true - Z_pred)**2).mean()
+    return mean_squared_error(Z_true, Z_pred)
 
 
 ### RESAMPLING METHODS ###
@@ -517,6 +525,7 @@ def folding_from_sklearn(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -
 
 ### MODEL SELECTION ###
 
+# our own implementation of the OLS method
 def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=None) -> tuple:
 
     """
@@ -574,6 +583,74 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
 
     # test predictions
     Z_pred_test = (X_test @ beta).reshape(-1, 1)
+
+    # evaluation
+    mse_test = MSE(Z_true=Z_test, Z_pred=Z_pred_test)
+    cod_test = CoD(Z_true=Z_test, Z_pred=Z_pred_test)
+
+    return beta, [mse_train, mse_test], [cod_train, cod_test], Z_pred_test
+
+# SciKit-Learn implementation of the OLS method
+def rOLS_sklearn(dataset_x: list, dataset_z: list, degree: int, intercept=False, ridge=False, lasso=False, lambda_r=None) -> tuple:
+
+    """
+    Ordinary Least Squares and Ridge Regression [optional] or Lasso Regression [optional]
+
+    Parameters
+    ----------
+    dataset_x : list
+        list of np.ndarray
+    dataset_z : list
+        list of np.ndarray
+    degree : int
+        degree of the polynomial
+    intercept : bool
+        if True, the model is fitted with an intercept, default False
+    ridge : bool
+        if True, ridge regression is performed, default False
+    lasso : bool
+        if True, lasso regression is performed, default False
+    lambda_r : float
+        regularization parameter, default None
+
+    Returns
+    -------
+    np.ndarray : beta
+    list : MSE scores 
+    list : CoD scores
+    np.ndarray : training and test predictions
+    """
+
+    # define data 
+    X_train, X_test = dataset_x
+    Z_train, Z_test = dataset_z
+
+    ###### TRAINING ######
+
+    if lasso:
+        # do lasso regression with scikit-learn
+        beta = Lasso(alpha=lambda_r).fit(X_train, Z_train).coef_
+    elif ridge:
+        # do ridge regression with scikit-learn
+        beta = Ridge(alpha=lambda_r).fit(X_train, Z_train).coef_
+    else:
+        # do OLS with scikit-learn
+        model = make_pipeline(PolynomialFeatures(degree), LinearRegression(fit_intercept=intercept))
+        model.fit(X_train, Z_train)
+        beta = model.steps[1][1].coef_.reshape(-1, 1)
+
+
+    # training predictions
+    Z_pred_train = model.predict(X_train).reshape(-1, 1)
+
+    # evaluation
+    mse_train = MSE(Z_true=Z_train, Z_pred=Z_pred_train)
+    cod_train = CoD(Z_true=Z_train, Z_pred=Z_pred_train)
+
+    ###### TEST ######
+
+    # test predictions
+    Z_pred_test = model.predict(X_test).reshape(-1, 1)
 
     # evaluation
     mse_test = MSE(Z_true=Z_test, Z_pred=Z_pred_test)
