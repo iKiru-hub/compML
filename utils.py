@@ -417,6 +417,7 @@ def MSE(Z_true: np.ndarray, Z_pred: np.ndarray) -> float:
 
 
 # K-FOLD
+
 def manual_folding(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -> list:
     
     """
@@ -522,6 +523,46 @@ def folding_from_sklearn(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -
         
     return list_of_folds_x, list_of_folds_z
 
+
+def cross_validation(X: np.ndarray, Z: np.ndarray, K: int, source: str) -> list:
+
+    """
+    K-fold cross validation
+
+    Parameters
+    ----------
+    X : np.ndarray
+        input data
+    Z : np.ndarray
+        target data
+    K : int
+        number of folds
+    source : str
+        "manual" or "sklearn"
+
+    Returns
+    -------
+    list : [[@ + + ... +],
+            [+ @ + ... +],
+            [+ + @ ... +],
+            ...
+            [+ + + ... @]]
+
+            + : training fold
+            @ : test fold
+
+        dataset folded each time moving the test fold rightward
+    list : same but for the test set
+    """
+
+    if source == "manual":
+        return manual_folding(X, Z, K)
+
+    elif source == "sklearn":
+        return folding_from_sklearn(X, Z, K)
+
+    else:
+        raise ValueError("source must be 'manual' or 'sklearn'")
 
 ### MODEL SELECTION ###
 
