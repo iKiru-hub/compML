@@ -605,7 +605,15 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
 
     if lasso:
         # do lasso regression with scikit-learn
-        beta = Lasso(alpha=lambda_r).fit(X_train, Z_train).coef_
+        lasso_model = Lasso(alpha=lambda_r)
+        lasso_model.fit(X_train, Z_train)
+        beta = lasso_model.coef_.reshape(-1, 1)
+
+        # training predictions
+        Z_pred_train = lasso_model.predict(X_train).reshape(-1, 1)
+
+        # test predictions
+        Z_pred_test = lasso_model.predict(X_test).reshape(-1, 1)
     else:
         ridge_reg = lambda_r * np.eye(X_train.shape[1]) 
         assert ridge_reg.shape == (X_train.shape[1], X_train.shape[1]), f"!shape mismatch : {ridge_reg.shape=} != {X_train.shape[1], X_train.shape[1]=}"
@@ -613,19 +621,19 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
         # compute optimal beta with matrix inversion
         beta = np.linalg.pinv(X_train.T @ X_train + ridge_reg) @ X_train.T @ Z_train
     
-    # training predictions
-    Z_pred_train = (X_train @ beta).reshape(-1, 1)
+        # training predictions
+        Z_pred_train = (X_train @ beta).reshape(-1, 1)
 
-    # evaluation
+        # test predictions
+        Z_pred_test = (X_test @ beta).reshape(-1, 1)
+
+    ###### EVALUATION ######
+
+    # evaluation training
     mse_train = MSE(Z_true=Z_train, Z_pred=Z_pred_train)
     cod_train = CoD(Z_true=Z_train, Z_pred=Z_pred_train)
 
-    ###### TEST ######
-
-    # test predictions
-    Z_pred_test = (X_test @ beta).reshape(-1, 1)
-
-    # evaluation
+    # evaluation test
     mse_test = MSE(Z_true=Z_test, Z_pred=Z_pred_test)
     cod_test = CoD(Z_true=Z_test, Z_pred=Z_pred_test)
 
