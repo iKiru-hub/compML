@@ -8,23 +8,72 @@ import time
 
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+from sklearn.datasets import fetch_openml
 
 # pytorch
 from torch import nn, optim, no_grad
 import torch
 from torch.autograd import Variable
 import torch.nn.functional as F
-from torchvision.transforms import ToTensor
-from torch.utils.data import DataLoader
-from torchvision.datasets import MNIST
-from torch.utils.data import random_split
 
 from IPython.display import clear_output
 
 
 """ DATASET """
 
-def get_mnist_data(batch_size=128, plot=False):
+def get_mnist_data_tf(plot=False):
+    
+    """
+    Function to get the MNIST dataset
+
+    Parameters
+    ----------
+    plot : bool
+        if True, plot the first 10 images of the training set. Default is False
+
+    Returns
+    -------
+    train_data : torch.Tensor
+        training data
+    train_labels : torch.Tensor
+        training labels
+    test_data : torch.Tensor
+        test data
+    test_labels : torch.Tensor
+        test labels
+    """
+
+    # Get the data
+    (train_data, train_labels), (test_data, test_labels) = mnist.load_data()
+
+    # Convert the data to float32
+    train_data = train_data.astype(np.float32)
+    test_data = test_data.astype(np.float32)
+
+    # Convert the data to tensors
+    train_data = torch.from_numpy(train_data)
+    test_data = torch.from_numpy(test_data)
+    train_labels = torch.from_numpy(train_labels)
+    test_labels = torch.from_numpy(test_labels)
+
+    # Add a channel dimension
+    train_data = train_data.unsqueeze(1)
+    test_data = test_data.unsqueeze(1)
+
+    # Plot the first 10 images of the training set
+    if plot:
+        plt.figure(figsize=(10, 10))
+        for i in range(10):
+            plt.subplot(1, 10, i+1)
+            plt.imshow(train_data[i][0], cmap='gray')
+            plt.axis('off')
+            plt.title(train_labels[i].item())
+        plt.show()
+
+    return train_data, train_labels, test_data, test_labels
+
+
+def get_mnist_data_torch(batch_size=128, plot=False):
 
     """
     Function to get the MNIST dataset
@@ -80,7 +129,7 @@ def get_mnist_data(batch_size=128, plot=False):
     return train_loader, test_loader, device
 
 
-def add_noise(data_x, noise_level=0.9):
+def add_noise_1(data_x, noise_level=0.9):
     
     """
     Function to add noise to the data
@@ -100,8 +149,187 @@ def add_noise(data_x, noise_level=0.9):
 
     return torch.clip(data_x + np.random.binomial(1, noise_level, size=data_x.shape) * np.clip(np.random.normal(0.2, 0.2, data_x.size()), 0.1, 0.75), 0, 1)
 
+def one_hot_encoding_in_batches(labels, n_classes=10, batch_size=1024):
+    """
+    Perform one-hot encoding in smaller batches to avoid memory issues.
+
+    Parameters
+    ----------
+    labels : torch.Tensor
+        Labels to be one-hot encoded.
+    n_classes : int
+        Number of classes.
+    batch_size : int, optional
+        Batch size for one-hot encoding. Default is 1024.
+
+    Returns
+    -------
+    torch.Tensor
+        One-hot encoded labels.
+    """
+    one_hot_labels = []
+
+    for i in range(0, len(labels), batch_size):
+        batch_labels = labels[i: i + batch_size]
+        one_hot_batch = nn.functional.one_hot(batch_labels.to(torch.int64), n_classes)
+        one_hot_labels.append(one_hot_batch)
+
+    return torch.cat(one_hot_labels, dim=0).unsqueeze(dim=1)
+
+def normalize_and_noise(data: np.ndarray, noise_spread: float=0.1, noise_level: float=0.9) -> np.ndarray:
+
+    """
+    Function to normalize and add noise to the data
+
+    Parameters
+    ----------
+    data : np.ndarray
+        data to normalize and add noise to
+    noise_spread : float
+        spread of the noise to add to the data. Default is 0.1
+    noise_level : float
+        level of noise to add to the data. Default is 0.9
+
+    Returns
+    -------
+    np.ndarray
+        normalized and noisy data
+    """
+
+    # normalize the data
+    data = data / 255
+
+    # add noise to the data from a binomial distribution and a normal distribution
+    return data + np.random.binomial(1, noise_spread, size=data.shape) * np.abs(np.random.normal(0., noise_level, data.shape)).clip(0, 0.5)
+
+
 # function for getting the data of a given dataset
-def build_data(train_loader, test_loader, n_classes: int, batch_size=10, noise_level=0.9, val_prop=0.1):
+def build_data(noise_spread=0.1, noise_level=0.9, test_prop=0.1, val_prop=0.1):
+    
+    """
+    Function to get the data from a dataset
+
+    Parameters
+    ----------
+    noise_spread : float
+        spread of the noise to add to the data. Default is 0.1
+    noise_level : float
+        level of noise to add to the data. Default is 0.9
+    test_prop : float
+        proportion of the test set with respect to
+        the data set. Default is 0.1.
+    val_prop : float
+        proportion of the validation set with respect to
+        the training set. Default is 0.1.
+
+    Returns
+    -------
+    train_data : torch.Tensor
+        training data
+    train_labels : torch.Tensor
+        training labels
+    test_data : torch.Tensor
+        test data
+    test_labels : torch.Tensor
+        test labels
+    val_data : torch.Tensor
+        validation data
+    val_labels : torch.Tensor
+        validation labels
+    xtrain_noisy : torch.Tensor
+        noisy training data
+    xtest_noisy : torch.Tensor
+        noisy test data
+    xval_noisy : torch.Tensor
+        noisy validation data
+    """
+
+    ### Get the data ###
+    mnist = fetch_openml('mnist_784', version=1, cache=True)
+    data, labels = mnist['data'], mnist['target']
+
+    # Split the data into train, test and validation sets using train_test_split
+    test_size = int(test_prop * len(data))
+    val_size = int(val_prop * len(data))
+   
+    train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=test_size)
+    train_data, val_data, train_labels, val_labels = train_test_split(train_data, train_labels, test_size=val_size)
+
+    # convert the data to numpy arrays
+    train_data = train_data.to_numpy()
+    test_data = test_data.to_numpy()
+    val_data = val_data.to_numpy()
+    train_labels = train_labels.to_numpy()
+    test_labels = test_labels.to_numpy()
+    val_labels = val_labels.to_numpy()
+
+    # Add noise to the training data
+    xtrain_noisy = normalize_and_noise(train_data, noise_spread, noise_level)
+    xtest_noisy = normalize_and_noise(test_data, noise_spread, noise_level)
+    xval_noisy = normalize_and_noise(val_data, noise_spread, noise_level)
+
+    # convert the data to tensors
+    train_data = torch.from_numpy(train_data.astype('float32'))
+    test_data = torch.from_numpy(test_data.astype('float32'))
+    val_data = torch.from_numpy(val_data.astype('float32'))
+    train_labels = torch.from_numpy(train_labels.astype('int64'))
+    test_labels = torch.from_numpy(test_labels.astype('int64'))
+    val_labels = torch.from_numpy(val_labels.astype('int64'))
+    xtrain_noisy = torch.from_numpy(xtrain_noisy.astype('float32'))
+    xtest_noisy = torch.from_numpy(xtest_noisy.astype('float32'))
+    xval_noisy = torch.from_numpy(xval_noisy.astype('float32'))
+
+    # Print the sizes of each data set
+    print(f'xtrain: {train_data.size()}')
+    print(f'ytrain: {train_labels.size()}')
+
+    print(f'\nxtest: {test_data.size()}')
+    print(f'ytest: {test_labels.size()}')
+
+    print(f'\nxval: {val_data.size()}')
+    print(f'yval: {val_labels.size()}')
+    
+    print(f'\nxtrain noisy: {xtrain_noisy.size()}')
+    print(f'xtest_noisy: {xtest_noisy.size()}')
+    print(f'xval_noisy: {xval_noisy.size()}')
+
+    return train_data, train_labels, test_data, test_labels, val_data, val_labels, xtrain_noisy, xtest_noisy, xval_noisy
+
+
+def plot_images(images, labels, n_images=10, title='Images'):
+    
+    """
+    Function to plot images
+
+    Parameters
+    ----------
+    images : torch.Tensor
+        images to plot
+    labels : torch.Tensor
+        labels of the images
+    n_images : int
+        number of images to plot. Default is 10
+    title : str
+        title of the plot. Default is 'Images'
+    """
+
+    # Plot the first 10 images of the training set
+    for i, (image, label) in enumerate(zip(images, labels)):
+        if i == n_images:
+            break
+        plt.figure(figsize=(10, 10))
+        plt.subplot(1, n_images, i+1)
+        plt.imshow(image, cmap='gray')
+        plt.axis('off')
+        plt.title(label.item())
+
+    plt.suptitle(title)
+    plt.show()
+
+
+
+# function for getting the data of a given dataset
+def build_data_2(train_loader, test_loader, n_classes: int, batch_size=10, noise_level=0.9, val_prop=0.1):
     
     """
     Function to get the data from a dataset
@@ -144,7 +372,7 @@ def build_data(train_loader, test_loader, n_classes: int, batch_size=10, noise_l
         noisy validation data
     """
 
-        ### TEST DATA ###
+    ### TEST DATA ###
     test_data = []
     test_labels = []
 
@@ -210,7 +438,20 @@ def build_data(train_loader, test_loader, n_classes: int, batch_size=10, noise_l
 """ MODELS """
 
 class CNN():
-    def __init__(self, n_output=10, channels=3):
+    def __init__(self, n_output=10, channels=1, batch_size=10):
+
+        """
+        Class for the CNN model
+
+        Parameters
+        ----------
+        n_output : int
+            number of output classes. Default is 10
+        channels : int
+            number of channels of the input images. Default is 1
+        batch_size : int
+            batch size for the training and test set
+        """
 
         self.model = nn.Sequential(
           
@@ -233,6 +474,7 @@ class CNN():
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
         self.criterion = nn.CrossEntropyLoss() 
         self.channels = channels
+        self.batch_size = batch_size
 
     def testing(self, test_x, test_y):
         with torch.no_grad():
@@ -246,7 +488,7 @@ class CNN():
     def training(self, epochs: int, x_train, y_train, x_val, y_val, x_test, y_test):
         self.model.train()
   
-        x_train, y_train = Variable(x_train.reshape(-1, batch_size, self.channels, 28, 28)), Variable(y_train.reshape(-1, batch_size))
+        x_train, y_train = Variable(x_train.reshape(-1, self.batch_size, self.channels, 28, 28)), Variable(y_train.reshape(-1, self.batch_size))
         x_val, y_val = Variable(x_val.reshape(-1, self.channels, 28, 28)), Variable(y_val.reshape(-1))
         x_test, y_test = Variable(x_test.reshape(-1, self.channels, 28, 28)), Variable(y_test.reshape(-1))
       
