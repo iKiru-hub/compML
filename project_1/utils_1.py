@@ -11,7 +11,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import mean_squared_error
 
 
-### utility functions ###
+""" utility functions """
 
 def save_figure(fig: object, name: str, path: str):
 
@@ -33,7 +33,7 @@ def save_figure(fig: object, name: str, path: str):
     print("Figure saved in", path + '/' + name + '.png')
 
 
-### DATA ###
+""" DATA """
 
 def FrankeFunction(x: np.ndarray, y: np.ndarray, noise_scale=0.1) -> np.ndarray:
     
@@ -205,7 +205,7 @@ def mean_centering(X: np.ndarray) -> np.ndarray:
     return X - np.mean(X, axis=0)
 
 
-### DESIGN MATRIX ###
+""" DESIGN MATRIX """
 
 def get_coefficients(nb_vars: int, degree: int, verbose=False) -> list:
 
@@ -363,7 +363,7 @@ def build_design_matrix_2(X: np.ndarray, Y=None, degree=1, intercept=False) -> n
     return D
 
 
-### EVALUATION METRICS ###
+""" EVALUATION METRICS """
 
 def CoD(Z_true: np.ndarray, Z_pred: np.ndarray) -> float:
 
@@ -413,8 +413,7 @@ def MSE(Z_true: np.ndarray, Z_pred: np.ndarray) -> float:
     return mean_squared_error(Z_true, Z_pred)
 
 
-### RESAMPLING METHODS ###
-
+""" RESAMPLING METHODS """
 
 # K-FOLD
 
@@ -564,7 +563,8 @@ def cross_validation(X: np.ndarray, Z: np.ndarray, K: int, source: str) -> list:
     else:
         raise ValueError("source must be 'manual' or 'sklearn'")
 
-### MODEL SELECTION ###
+
+""" MODEL SELECTION """
 
 # our own implementation of the OLS method
 def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=None) -> tuple:
@@ -707,83 +707,4 @@ def rOLS_sklearn(dataset_x: list, dataset_z: list, degree: int, intercept=False,
 
     return beta, [mse_train, mse_test], [cod_train, cod_test], Z_pred_test
 
-
-# stochastic gradient descent
-def SGD(dataset_x: list, dataset_z: list, n_epochs=100, batch_size=100, lr=0.01):
-    
-    """
-    Stochastic Gradient Descent
-
-    Parameters
-    ----------
-    dataset_x : list
-        list of np.ndarray
-    dataset_z : list
-        list of np.ndarray
-    n_epochs : int
-        number of epochs, default 100
-    batch_size : int
-        size of the batch, default 100
-    lr : float
-        learning rate, default 0.01
-
-    Returns
-    -------
-    np.ndarray : beta
-    list : MSE scores 
-    list : COD scores
-    list : test predictions
-    """
-    
-    # define data 
-    X_train, X_test = dataset_x
-    Z_train, Z_test = dataset_z
-    
-    # initialize beta
-    beta = np.random.randn(X_train.shape[1], 1)
-    
-    # compute number of batches 
-    n_batches = X_train.shape[0] // batch_size
-    
-    # training loop
-    for epoch in range(n_epochs):
-        
-        # shuffle training data
-        random_idx = np.random.permutation(X_train.shape[0])
-        X_train, Z_train = X_train[random_idx], Z_train[random_idx]
-        
-        # batch loop
-        for i in range(n_batches):
-            
-            # define batch
-            X_batch = X_train[i*batch_size : (i+1)*batch_size, :]
-            Z_batch = Z_train[i*batch_size : (i+1)*batch_size, :]
-            
-            # compute predictions
-            Z_pred = X_batch @ beta
-            
-            # compute gradient
-            grad = 2 * X_batch.T @ (Z_pred - Z_batch) / batch_size
-            
-            # update beta
-            beta -= lr * grad
-            
-    # training predictions
-    Z_pred_train = X_train @ beta
-    
-    # evaluation
-    mse_train = MSE(Z_true=Z_train, Z_pred=Z_pred_train)
-    cod_train = CoD(Z_true=Z_train, Z_pred=Z_pred_train)
-    
-    ###### TEST ######
-    
-    # test predictions
-    Z_pred_test = X_test @ beta
-    
-    # evaluation
-    mse_test = MSE(Z_true=Z_test, Z_pred=Z_pred_test)
-    cod_test = CoD(Z_true=Z_test, Z_pred=Z_pred_test)
-    
-    return beta, [mse_train, mse_test], [cod_train, cod_test], Z_pred_test
-    
 
