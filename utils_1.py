@@ -598,7 +598,7 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
     Z_train, Z_test = dataset_z
 
     # if ridge regression is not selected, set the parameter to zero
-    if (not ridge) and (not lasso):
+    if not (ridge or lasso):
         lambda_r = 0
 
     ###### TRAINING ######
@@ -607,7 +607,7 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
         # do lasso regression with scikit-learn
         lasso_model = Lasso(alpha=lambda_r)
         lasso_model.fit(X_train, Z_train)
-        beta = lasso_model.coef_.reshape(-1, 1)
+        beta = np.hstack((lasso_model.intercept_, lasso_model.coef_))
 
         # training predictions
         Z_pred_train = lasso_model.predict(X_train).reshape(-1, 1)
