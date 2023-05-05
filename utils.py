@@ -1,6 +1,6 @@
 import numpy as np
 import sklearn.metrics
-import tensorflow as tf
+# import tensorflow as tf
 from sklearn import preprocessing
 from sklearn.model_selection import KFold
 from sklearn.linear_model import Lasso, Ridge, LinearRegression
