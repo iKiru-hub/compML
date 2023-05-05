@@ -1,6 +1,10 @@
-import numpy as np 
+import numpy as np
+import sklearn.metrics
 from sklearn.model_selection import KFold
 from sklearn.linear_model import Lasso
+import tensorflow as tf
+
+
 
 
 ### DESIGN MATRIX ###
@@ -108,7 +112,7 @@ def build_design_matrix(X: np.ndarray, Y=None, degree=1) -> np.ndarray:
         
         D = np.concatenate([D, X**coeff[i] * Y**coeff[i+1]], axis=trg_ax)
         
-    return D
+    return D#[:, 1:]
 
 
 ### DATA ###
@@ -140,7 +144,7 @@ def FrankeFunction(x: np.ndarray, y: np.ndarray, noise_scale=0.1) -> np.ndarray:
     return term1 + term2 + term3 + term4 + noise_term
 
 
-def generate_data(N: int, random_ax=True, noise_scale=0.1) -> tuple:
+def generate_data(N: int, random_ax=True, noise_scale=0.1, mesh=True) -> tuple:
     
     """
     generate the data for training and 2d mesh
@@ -180,10 +184,12 @@ def generate_data(N: int, random_ax=True, noise_scale=0.1) -> tuple:
 
     z = FrankeFunction(x, y, noise_scale=noise_scale)
 
-    xm, ym = np.meshgrid(x,y)
-    zm = FrankeFunction(xm, ym, noise_scale=noise_scale)
-    
-    return (x, y, z), (xm, ym, zm)
+    if mesh:
+        xm, ym = np.meshgrid(x,y)
+        zm = FrankeFunction(xm, ym, noise_scale=noise_scale)
+
+        return (x, y, z), (xm, ym, zm)
+    return (x, y, z)
 
 
 def polynomial_data(degree: int, N: int, true_beta=None, random_ax=True, noise_scale=0, verbose=False) -> tuple:
@@ -365,9 +371,9 @@ def folding_from_sklearn(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -
     Parameters
     ----------
     dataset_x : np.ndarray
-        design matrix 
+        design matrix
     dataset_z : np.ndarray
-        vector of targets 
+        vector of targets
     K : int
         number of folds
 
@@ -378,28 +384,74 @@ def folding_from_sklearn(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -
             [+ + @ ... +],
             ...
             [+ + + ... @]]
-            
+
             + : training fold
             @ : test fold
-            
+
         dataset folded each time moving the test fold rightward
     list : same but for the test set
     """
-   
+
     # KFold method from sklearn
     kf = KFold(n_splits=K)
 
     # list of folds
     list_of_folds_x = []
     list_of_folds_z = []
-    
+
     # loop folds iterations
     for train_index, test_index in kf.split(dataset_x):
-        
+
         # append
         list_of_folds_x += [[dataset_x[train_index], dataset_x[test_index]]]
         list_of_folds_z += [[dataset_z[train_index], dataset_z[test_index]]]
-        
+
+    return list_of_folds_x, list_of_folds_z
+
+
+def folding_tensor_from_sklearn(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -> (list, list):
+    """
+        implement a k-fold tensor splitting using sklearn
+
+        Parameters
+        ----------
+        dataset_x : tf.tensor
+            design matrix
+        dataset_z : tf.tensor
+            vector of targets
+        K : int
+            number of folds
+
+        Returns
+        -------
+        list : [[@ + + ... +],
+                [+ @ + ... +],
+                [+ + @ ... +],
+                ...
+                [+ + + ... @]]
+
+                + : training fold
+                @ : test fold
+
+            dataset folded each time moving the test fold rightward
+        list : same but for the test set
+        """
+
+
+    # KFold method from sklearn
+    kf = KFold(n_splits=K)
+
+    # list of folds
+    list_of_folds_x = []
+    list_of_folds_z = []
+
+    # loop folds iterations
+    for train_index, test_index in kf.split(dataset_x):
+
+        # append
+        list_of_folds_x += [[tf.gather(dataset_x, train_index), tf.gather(dataset_x, test_index)]]
+        list_of_folds_z += [[tf.gather(dataset_z, train_index), tf.gather(dataset_z, test_index)]]
+
     return list_of_folds_x, list_of_folds_z
 
 
@@ -440,7 +492,10 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
         lambda_r = 0
 
     ###### TRAINING ######
-
+    #tmp = X_train.T @ X_train
+    #tmp_det = np.linalg.det(tmp)
+    #tmp += lambda_r * np.eye(X_train.shape[1])
+    #tmp_det = np.linalg.det(tmp)
     # compute optimal beta with matrix inversion
     beta = np.linalg.pinv(X_train.T @ X_train + lambda_r * np.eye(X_train.shape[1])) @ X_train.T @ Z_train
 
@@ -449,6 +504,7 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
         beta = Lasso(alpha=lambda_r).fit(X_train, Z_train).coef_
     
     # training predictions
+    Z_pred_train = (X_train @ beta).reshape(-1, 1)
     Z_pred_train = (X_train @ beta).reshape(-1, 1)
 
     # evaluation
@@ -544,5 +600,44 @@ def SGD(dataset_x: list, dataset_z: list, n_epochs=100, batch_size=100, lr=0.01)
     cod_test = CoD(Z_true=Z_test, Z_pred=Z_pred_test)
     
     return beta, [mse_train, mse_test], [cod_train, cod_test], Z_pred_test
+
+
+
+def logistic_function(x, betas):
+    """
+    Logistic function
+    Parameters
+    ----------
+    x : tf.tensor
+        input data
+    betas : tf.tensor
+        logistic regression parameters
+
+    Returns
+    -------
+    tf.tensor : logistic function
+    """
+    feature_input = x*betas[1:]
+    exp_term = -(betas[0] + tf.reduce_sum(feature_input, axis=1))
+    return 1 / (1+tf.math.exp(exp_term))
+
+
+def cross_entropy(y_true, prediction):
+    """
+    Cross entropy loss function
+    Parameters
+    ----------
+    y_true: tf.tensor
+        ground truth labels
+    prediction: tf.tensor
+        predicted probabilities
+
+    Returns
+    -------
+    tf.tensor : cross entropy loss
+    """
+    ce_eps = 1e-7
+    prediction = tf.clip_by_value(prediction, ce_eps, 1-ce_eps) #clip to avoid numerical problems with log(0). In general, logit= 0 or 1 shouldn't be possible, but these values come up due to the limited float32 precision
+    return -tf.reduce_mean(y_true * tf.math.log(prediction) + (1-y_true)*tf.math.log(1-prediction))
     
 
