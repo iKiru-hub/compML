@@ -1,117 +1,39 @@
 import numpy as np 
+from sklearn import preprocessing
 from sklearn.model_selection import KFold
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, Ridge, LinearRegression
+
+# model for comparison
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+
+# import mean_squared_error
+from sklearn.metrics import mean_squared_error
 
 
-### DESIGN MATRIX ###
+""" utility functions """
 
-def get_coefficients(nb_vars: int, degree: int, verbose=False) -> list:
+def save_figure(fig: object, name: str, path: str):
 
     """
-    return the coefficients of a polynomial of degree=degree and $nb_vars dimensions 
-    in the form of a list
+    save a figure in a path
 
     Parameters
     ----------
-    nb_vars : int
-        number of variables
-    degree : int
-        degree of the polynomial
-    verbose : bool
-        if True, the polynomial is printed, default False
-
-    Returns
-    -------
-    list : coefficients
+    fig : matplotlib.figure.Figure
+        figure to save
+    name : str
+        name of the file
+    path : str
+        path where to save the figure
     """
 
-    # check 
-    assert degree > 0, "degree must be greater that zero"
-    assert 0 < nb_vars < 3, "the number of variables must be between 1 and 2"
+    fig.savefig(path + '/' + name + '.png', dpi=300, bbox_inches='tight')
 
-    # one dimension case
-    if nb_vars == 1:
-        return [i for i in range(1, degree + 1)]
-
-    # two dimensions case
-    def combinations(n: int) -> list:
-
-        """
-        return the combinations of the variables' degrees of the form (i, n-i) where i = 0, 1, ..., n
-        """
-        combs = []
-        for i in range(n + 1):
-            combs += [i]
-            combs += [n - i]
-        return combs
-
-    coeff = []
-    for d in range(1, degree + 1):
-        coeff += combinations(d)
-        
-    if verbose:
-        func = []
-        for i in range(0, len(coeff), 2):
-            func.append(f"x^{coeff[i]}*y^{coeff[i + 1]}")
-
-        print(f'(len: {len(func)}) | form z =', end='')
-        for j, pair in enumerate(func):
-            if j != 0: print("+", end='')
-            print(f" {pair}", end=" ")
-    
-    return coeff
+    print("Figure saved in", path + '/' + name + '.png')
 
 
-def build_design_matrix(X: np.ndarray, Y=None, degree=1) -> np.ndarray:
-
-    """
-    return the design matrix of an input with one or two features, and degree=degree
-
-    Parameters
-    ----------
-    X : np.ndarray
-        (n, 1) feature 1 
-    Y : np.ndarray [optional]
-        (n, 1) feature 2, default None
-    degree : int
-        degree of the polynomial, default 1
-
-    Returns
-    -------
-    np.ndarray : design matrix
-    """
-    
-    # size of the data
-    n = len(X)
-    trg_ax = 1
-    D = np.ones((n, 1))
-    
-    # one dimension case
-    if Y is None:
-        coeff = get_coefficients(nb_vars=1, degree=degree)
-        for i in range(len(coeff)):
-            D = np.concatenate([D, X**coeff[i]], axis=trg_ax)
-        return D
-
-    # two dimensions case
-    # mesh data case
-    if X.shape[1] > 1:
-        X = X.reshape(n, n, 1)
-        Y = Y.reshape(n, n, 1)
-        trg_ax = 2
-        D = np.ones((n, n, 1))
-    
-    coeff = get_coefficients(nb_vars=2, degree=degree)
-    
-    # build the full Design matrix
-    for i in range(0, len(coeff), 2):
-        
-        D = np.concatenate([D, X**coeff[i] * Y**coeff[i+1]], axis=trg_ax)
-        
-    return D
-
-
-### DATA ###
+""" DATA """
 
 def FrankeFunction(x: np.ndarray, y: np.ndarray, noise_scale=0.1) -> np.ndarray:
     
@@ -140,7 +62,7 @@ def FrankeFunction(x: np.ndarray, y: np.ndarray, noise_scale=0.1) -> np.ndarray:
     return term1 + term2 + term3 + term4 + noise_term
 
 
-def generate_data(N: int, random_ax=True, noise_scale=0.1) -> tuple:
+def generate_data(N: int, random_ax: bool=True, noise_scale: float=0.1, scaling: bool=False, mean_center=False) -> tuple:
     
     """
     generate the data for training and 2d mesh
@@ -153,6 +75,10 @@ def generate_data(N: int, random_ax=True, noise_scale=0.1) -> tuple:
         if True x, y will be drawn from rand() else arange, default True
     noise_scale : float
         standard devation of the noise term drawn from a Normal with zero mean, default 0.1
+    scaling : bool
+        if True, scale the data, default False
+    mean_center : bool
+        if True, mean center the data, default False
         
     Returns
     -------
@@ -178,11 +104,27 @@ def generate_data(N: int, random_ax=True, noise_scale=0.1) -> tuple:
         x = np.linspace(0, 1, N).reshape(N, 1)
         y = np.linspace(0, 1, N).reshape(N, 1)
 
+    # define the target
     z = FrankeFunction(x, y, noise_scale=noise_scale)
 
+    # make meshgrid
     xm, ym = np.meshgrid(x,y)
     zm = FrankeFunction(xm, ym, noise_scale=noise_scale)
-    
+
+    # scale the data
+    if scaling:
+        x, y, xm, ym = (preprocessing.StandardScaler().fit_transform(x), 
+                        preprocessing.StandardScaler().fit_transform(y), 
+                        preprocessing.StandardScaler().fit_transform(xm), 
+                        preprocessing.StandardScaler().fit_transform(ym))
+
+    # mean center the data
+    if mean_center:
+        x, y, xm, ym = (mean_centering(x),
+                        mean_centering(y),
+                        mean_centering(xm),
+                        mean_centering(ym))
+   
     return (x, y, z), (xm, ym, zm)
 
 
@@ -244,7 +186,184 @@ def polynomial_data(degree: int, N: int, true_beta=None, random_ax=True, noise_s
     return x, D @ true_beta + noise, true_beta
 
 
-### EVALUATION METRICS ###
+def mean_centering(X: np.ndarray) -> np.ndarray:
+
+    """
+    mean centering of the data
+
+    Parameters
+    ----------
+    X : np.ndarray
+        (N, M)
+
+    Returns
+    -------
+    np.ndarray : X
+        (N, M)
+    """
+
+    return X - np.mean(X, axis=0)
+
+
+""" DESIGN MATRIX """
+
+def get_coefficients(nb_vars: int, degree: int, verbose=False) -> list:
+
+    """
+    return the coefficients of a polynomial of degree=degree and $nb_vars dimensions 
+    in the form of a list
+
+    Parameters
+    ----------
+    nb_vars : int
+        number of variables
+    degree : int
+        degree of the polynomial
+    verbose : bool
+        if True, the polynomial is printed, default False
+
+    Returns
+    -------
+    list : coefficients
+    """
+
+    # check 
+    assert degree > 0, "degree must be greater that zero"
+    assert 0 < nb_vars < 3, "the number of variables must be between 1 and 2"
+
+    # one dimension case
+    if nb_vars == 1:
+        return [i for i in range(1, degree + 1)]
+
+    # two dimensions case
+    def combinations(n: int) -> list:
+
+        """
+        return the combinations of the variables' degrees of the form (i, n-i) where i = 0, 1, ..., n
+        """
+        combs = []
+        for i in range(n + 1):
+            combs += [i]
+            combs += [n - i]
+        return combs
+
+    coeff = []
+    for d in range(1, degree + 1):
+        coeff += combinations(d)
+        
+    if verbose:
+        func = []
+        for i in range(0, len(coeff), 2):
+            func.append(f"x^{coeff[i]}*y^{coeff[i + 1]}")
+
+        print(f'(len: {len(func)}) | form z =', end='')
+        for j, pair in enumerate(func):
+            if j != 0: print("+", end='')
+            print(f" {pair}", end=" ")
+    
+    return coeff
+
+
+def build_design_matrix(X: np.ndarray, Y=None, degree=1, intercept=False) -> np.ndarray:
+
+    """
+    return the design matrix of an input with one or two features, and degree=degree
+
+    Parameters
+    ----------
+    X : np.ndarray
+        (n, 1) feature 1 
+    Y : np.ndarray [optional]
+        (n, 1) feature 2, default None
+    degree : int
+        degree of the polynomial, default 1
+    intercept : bool
+        if True, the intercept is added, default False
+
+    Returns
+    -------
+    np.ndarray : design matrix
+    """
+    
+    # size of the data
+    n = len(X)
+    trg_ax = 1
+    D = np.ones((n, 1)) if intercept else np.zeros((n, 1))
+    
+    # one dimension case
+    if Y is None:
+        coeff = get_coefficients(nb_vars=1, degree=degree)
+        for i in range(len(coeff)):
+            D = np.concatenate([D, X**coeff[i]], axis=trg_ax)
+        return D
+
+    # two dimensions case
+    # mesh data case
+    if X.shape[1] > 1:
+        X = X.reshape(n, n, 1)
+        Y = Y.reshape(n, n, 1)
+        trg_ax = 2
+        D = np.ones((n, n, 1)) if intercept else np.zeros((n, n, 1))
+    
+    coeff = get_coefficients(nb_vars=2, degree=degree)
+    
+    # build the full Design matrix
+    for i in range(0, len(coeff), 2):
+        
+        D = np.concatenate([D, X**coeff[i] * Y**coeff[i+1]], axis=trg_ax)
+        
+    return D
+
+
+def build_design_matrix_2(X: np.ndarray, Y=None, degree=1, intercept=False) -> np.ndarray:
+
+    """
+    return the design matrix of an input with one or two features, and degree=degree
+
+    Parameters
+    ----------
+    X : np.ndarray
+        (n, 1) feature 1 
+    Y : np.ndarray [optional]
+        (n, 1) feature 2, default None
+    degree : int
+        degree of the polynomial, default 1
+    intercept : bool
+        if True, the intercept is added, default False
+
+    Returns
+    -------
+    np.ndarray : design matrix
+    """
+
+    # size of the data
+    n = len(X)
+    trg_ax = 1
+    D = np.ones((n, 1)) 
+
+    # one dimension case
+    if Y is None:
+        for i in range(1, degree + 1):
+            D = np.concatenate([D, X**i], axis=trg_ax)
+        return D
+
+    # two dimensions case
+    # mesh data case
+    if X.shape[1] > 1:
+        X = X.reshape(n, n, 1)
+        Y = Y.reshape(n, n, 1)
+        trg_ax = 2
+        D = np.ones((n, n, 1))
+
+    # build the full Design matrix
+    for i in range(1, degree + 1):
+        for j in range(i + 1):
+            D = np.concatenate([D, X**(i - j) * Y**j], axis=trg_ax)
+
+    return D
+
+
+""" EVALUATION METRICS """
 
 def CoD(Z_true: np.ndarray, Z_pred: np.ndarray) -> float:
 
@@ -290,13 +409,14 @@ def MSE(Z_true: np.ndarray, Z_pred: np.ndarray) -> float:
     
     assert Z_true.shape == Z_pred.shape, f"!shape mismatch : {Z_true.shape=} != {Z_pred.shape=}"
     
-    return ((Z_true - Z_pred)**2).mean()
+    # return ((Z_true - Z_pred)**2).mean()
+    return mean_squared_error(Z_true, Z_pred)
 
 
-### RESAMPLING METHODS ###
-
+""" RESAMPLING METHODS """
 
 # K-FOLD
+
 def manual_folding(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -> list:
     
     """
@@ -403,8 +523,50 @@ def folding_from_sklearn(dataset_x: np.ndarray, dataset_z: np.ndarray, K: int) -
     return list_of_folds_x, list_of_folds_z
 
 
-### MODEL SELECTION ###
+def cross_validation(X: np.ndarray, Z: np.ndarray, K: int, source: str) -> list:
 
+    """
+    K-fold cross validation
+
+    Parameters
+    ----------
+    X : np.ndarray
+        input data
+    Z : np.ndarray
+        target data
+    K : int
+        number of folds
+    source : str
+        "manual" or "sklearn"
+
+    Returns
+    -------
+    list : [[@ + + ... +],
+            [+ @ + ... +],
+            [+ + @ ... +],
+            ...
+            [+ + + ... @]]
+
+            + : training fold
+            @ : test fold
+
+        dataset folded each time moving the test fold rightward
+    list : same but for the test set
+    """
+
+    if source == "manual":
+        return manual_folding(X, Z, K)
+
+    elif source == "sklearn":
+        return folding_from_sklearn(X, Z, K)
+
+    else:
+        raise ValueError("source must be 'manual' or 'sklearn'")
+
+
+""" MODEL SELECTION """
+
+# our own implementation of the OLS method
 def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=None) -> tuple:
 
     """
@@ -436,42 +598,52 @@ def rOLS(dataset_x: list, dataset_z: list, ridge=False, lasso=False, lambda_r=No
     Z_train, Z_test = dataset_z
 
     # if ridge regression is not selected, set the parameter to zero
-    if (not ridge) and (not lasso):
+    if not (ridge or lasso):
         lambda_r = 0
 
     ###### TRAINING ######
 
-    # compute optimal beta with matrix inversion
-    beta = np.linalg.pinv(X_train.T @ X_train + lambda_r * np.eye(X_train.shape[1])) @ X_train.T @ Z_train
-
     if lasso:
         # do lasso regression with scikit-learn
-        beta = Lasso(alpha=lambda_r).fit(X_train, Z_train).coef_
-    
-    # training predictions
-    Z_pred_train = (X_train @ beta).reshape(-1, 1)
+        lasso_model = Lasso(alpha=lambda_r)
+        lasso_model.fit(X_train, Z_train)
+        beta = np.hstack((lasso_model.intercept_, lasso_model.coef_))
 
-    # evaluation
+        # training predictions
+        Z_pred_train = lasso_model.predict(X_train).reshape(-1, 1)
+
+        # test predictions
+        Z_pred_test = lasso_model.predict(X_test).reshape(-1, 1)
+    else:
+        ridge_reg = lambda_r * np.eye(X_train.shape[1]) 
+        assert ridge_reg.shape == (X_train.shape[1], X_train.shape[1]), f"!shape mismatch : {ridge_reg.shape=} != {X_train.shape[1], X_train.shape[1]=}"
+
+        # compute optimal beta with matrix inversion
+        beta = np.linalg.pinv(X_train.T @ X_train + ridge_reg) @ X_train.T @ Z_train
+    
+        # training predictions
+        Z_pred_train = (X_train @ beta).reshape(-1, 1)
+
+        # test predictions
+        Z_pred_test = (X_test @ beta).reshape(-1, 1)
+
+    ###### EVALUATION ######
+
+    # evaluation training
     mse_train = MSE(Z_true=Z_train, Z_pred=Z_pred_train)
     cod_train = CoD(Z_true=Z_train, Z_pred=Z_pred_train)
 
-    ###### TEST ######
-
-    # test predictions
-    Z_pred_test = (X_test @ beta).reshape(-1, 1)
-
-    # evaluation
+    # evaluation test
     mse_test = MSE(Z_true=Z_test, Z_pred=Z_pred_test)
     cod_test = CoD(Z_true=Z_test, Z_pred=Z_pred_test)
 
     return beta, [mse_train, mse_test], [cod_train, cod_test], Z_pred_test
 
+# SciKit-Learn implementation of the OLS method
+def rOLS_sklearn(dataset_x: list, dataset_z: list, degree: int, intercept=False, ridge=False, lasso=False, lambda_r=None) -> tuple:
 
-# stochastic gradient descent
-def SGD(dataset_x: list, dataset_z: list, n_epochs=100, batch_size=100, lr=0.01):
-    
     """
-    Stochastic Gradient Descent
+    Ordinary Least Squares and Ridge Regression [optional] or Lasso Regression [optional]
 
     Parameters
     ----------
@@ -479,70 +651,60 @@ def SGD(dataset_x: list, dataset_z: list, n_epochs=100, batch_size=100, lr=0.01)
         list of np.ndarray
     dataset_z : list
         list of np.ndarray
-    n_epochs : int
-        number of epochs, default 100
-    batch_size : int
-        size of the batch, default 100
-    lr : float
-        learning rate, default 0.01
+    degree : int
+        degree of the polynomial
+    intercept : bool
+        if True, the model is fitted with an intercept, default False
+    ridge : bool
+        if True, ridge regression is performed, default False
+    lasso : bool
+        if True, lasso regression is performed, default False
+    lambda_r : float
+        regularization parameter, default None
 
     Returns
     -------
     np.ndarray : beta
     list : MSE scores 
-    list : COD scores
-    list : test predictions
+    list : CoD scores
+    np.ndarray : training and test predictions
     """
-    
+
     # define data 
     X_train, X_test = dataset_x
     Z_train, Z_test = dataset_z
-    
-    # initialize beta
-    beta = np.random.randn(X_train.shape[1], 1)
-    
-    # compute number of batches 
-    n_batches = X_train.shape[0] // batch_size
-    
-    # training loop
-    for epoch in range(n_epochs):
-        
-        # shuffle training data
-        random_idx = np.random.permutation(X_train.shape[0])
-        X_train, Z_train = X_train[random_idx], Z_train[random_idx]
-        
-        # batch loop
-        for i in range(n_batches):
-            
-            # define batch
-            X_batch = X_train[i*batch_size : (i+1)*batch_size, :]
-            Z_batch = Z_train[i*batch_size : (i+1)*batch_size, :]
-            
-            # compute predictions
-            Z_pred = X_batch @ beta
-            
-            # compute gradient
-            grad = 2 * X_batch.T @ (Z_pred - Z_batch) / batch_size
-            
-            # update beta
-            beta -= lr * grad
-            
+
+    ###### TRAINING ######
+
+    if lasso:
+        # do lasso regression with scikit-learn
+        beta = Lasso(alpha=lambda_r).fit(X_train, Z_train).coef_
+    elif ridge:
+        # do ridge regression with scikit-learn
+        beta = Ridge(alpha=lambda_r).fit(X_train, Z_train).coef_
+    else:
+        # do OLS with scikit-learn
+        model = make_pipeline(PolynomialFeatures(degree), LinearRegression(fit_intercept=intercept))
+        model.fit(X_train, Z_train)
+        beta = model.steps[1][1].coef_.reshape(-1, 1)
+
+
     # training predictions
-    Z_pred_train = X_train @ beta
-    
+    Z_pred_train = model.predict(X_train).reshape(-1, 1)
+
     # evaluation
     mse_train = MSE(Z_true=Z_train, Z_pred=Z_pred_train)
     cod_train = CoD(Z_true=Z_train, Z_pred=Z_pred_train)
-    
+
     ###### TEST ######
-    
+
     # test predictions
-    Z_pred_test = X_test @ beta
-    
+    Z_pred_test = model.predict(X_test).reshape(-1, 1)
+
     # evaluation
     mse_test = MSE(Z_true=Z_test, Z_pred=Z_pred_test)
     cod_test = CoD(Z_true=Z_test, Z_pred=Z_pred_test)
-    
+
     return beta, [mse_train, mse_test], [cod_train, cod_test], Z_pred_test
-    
+
 
